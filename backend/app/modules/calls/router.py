@@ -56,4 +56,4 @@ async def webhook_call(
     payload: WebhookCallPayload,
     session: SessionDep,
 ) -> CallResponse:
-    pass
+    raise NotImplementedError("webhook_call is implemented in Task 4")

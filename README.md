@@ -33,7 +33,7 @@ cp .env.example .env
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
-The database (`db.sqlite3`) is included in the repo and already contains 100 sample calls — no migrations or seeding needed to get started.
+The database is created and seeded automatically — `docker compose up` (or `make migrate && make seed` for a local, non-Docker run) applies migrations and loads 100 sample calls. No binary database is committed to the repo.
 
 ### Migrations
 

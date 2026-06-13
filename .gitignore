@@ -15,10 +15,9 @@ venv/
 .env
 *.env.local
 
-# Database
+# Database (created via migrations + seed; never committed)
 *.db
 *.sqlite3
-!backend/db.sqlite3
 
 # Logs
 *.log
@@ -27,6 +26,7 @@ venv/
 node_modules/
 frontend/dist/
 frontend/.vite/
+*.tsbuildinfo
 
 # OS
 .DS_Store
