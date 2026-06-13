@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.11.21"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+      - run: uv run pytest
+      - name: OpenAPI snapshot is up to date
+        run: |
+          uv run python scripts/export_openapi.py
+          cd ..
+          git diff --exit-code docs/api/openapi.json
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backend tests in the sanctioned container
+        run: docker compose --profile test run --rm --build backend-test
+      - name: Frontend tests in the sanctioned container
+        run: docker compose --profile test run --rm --build frontend-test
+      - name: App boots from an empty database
+        run: |
+          docker compose up --build -d backend
+          for _ in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' voico-backend-1 2>/dev/null || echo starting)
+            [ "$status" = "healthy" ] && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/health || { docker compose logs backend; exit 1; }
+          docker compose down -v

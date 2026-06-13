@@ -1,0 +1,55 @@
+name: voico
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    image: voico-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/db.sqlite3
+      ALLOWED_ORIGINS: http://localhost:5173
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    env_file:
+      - path: ./backend/.env
+        required: false
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    image: voico-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Test suites in the sanctioned containers. Activate with: docker compose --profile test
+  backend-test:
+    build:
+      context: ./backend
+      target: test
+    image: voico-backend-test
+    profiles: ["test"]
+    command: ["pytest", "-q"]
+
+  frontend-test:
+    build:
+      context: ./frontend
+      target: test
+    image: voico-frontend-test
+    profiles: ["test"]
+    command: ["npm", "test"]
+
+volumes:
+  data:
