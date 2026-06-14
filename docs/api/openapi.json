@@ -159,6 +159,20 @@
         "title": "CallResponse",
         "type": "object"
       },
+      "CallSortField": {
+        "description": "Whitelist of columns the list endpoint may sort by.\n\nClosed by construction: an unknown value is a 422 at the HTTP boundary, so the sort column can\nnever be interpolated from arbitrary input. Internal/audit columns (raw_transcript, notes, the\nTask 4 queue columns) are deliberately absent \u2014 they are neither public nor sortable.",
+        "enum": [
+          "created_at",
+          "started_at",
+          "duration_seconds",
+          "caller_name",
+          "phone_number",
+          "status",
+          "label"
+        ],
+        "title": "CallSortField",
+        "type": "string"
+      },
       "CallStatus": {
         "enum": [
           "in_progress",
@@ -220,6 +234,14 @@
         ],
         "title": "PaginatedCallsResponse",
         "type": "object"
+      },
+      "SortDir": {
+        "enum": [
+          "asc",
+          "desc"
+        ],
+        "title": "SortDir",
+        "type": "string"
       },
       "UpdateCallNotesRequest": {
         "additionalProperties": false,
@@ -347,9 +369,11 @@
   "paths": {
     "/api/calls": {
       "get": {
+        "description": "List calls. All filters are optional and combined with AND; an empty text filter is ignored.\n\n`counts` is the per-status breakdown over the active content filters (ignoring `status`), so the\nstatus tabs stay informative; `total` and the returned page additionally respect `status`.",
         "operationId": "list_calls_api_calls_get",
         "parameters": [
           {
+            "description": "Exact status match.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -362,7 +386,124 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact status match.",
               "title": "Status"
+            }
+          },
+          {
+            "description": "Case-insensitive partial match on the caller's name.",
+            "in": "query",
+            "name": "caller_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive partial match on the caller's name.",
+              "title": "Caller Name"
+            }
+          },
+          {
+            "description": "Partial phone match. Compared on digits only, so formatting is ignored (e.g. `5552014832` matches `+1 (555) 201-4832`).",
+            "in": "query",
+            "name": "phone",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial phone match. Compared on digits only, so formatting is ignored (e.g. `5552014832` matches `+1 (555) 201-4832`).",
+              "title": "Phone"
+            }
+          },
+          {
+            "description": "Exact label match (e.g. `Sales inquiry`).",
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CallLabel"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact label match (e.g. `Sales inquiry`).",
+              "title": "Label"
+            }
+          },
+          {
+            "description": "Minimum call duration in seconds (inclusive).",
+            "in": "query",
+            "name": "min_duration",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 86400,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum call duration in seconds (inclusive).",
+              "title": "Min Duration"
+            }
+          },
+          {
+            "description": "Maximum call duration in seconds (inclusive).",
+            "in": "query",
+            "name": "max_duration",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 86400,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum call duration in seconds (inclusive).",
+              "title": "Max Duration"
+            }
+          },
+          {
+            "description": "Column to sort by (whitelisted).",
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CallSortField",
+              "default": "created_at",
+              "description": "Column to sort by (whitelisted)."
+            }
+          },
+          {
+            "description": "Sort direction.",
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDir",
+              "default": "desc",
+              "description": "Sort direction."
             }
           },
           {
@@ -371,6 +512,7 @@
             "required": false,
             "schema": {
               "default": 1,
+              "maximum": 1000000,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -401,17 +543,10 @@
             "description": "Successful Response"
           },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid filter, sort field, or duration range"
           }
         },
-        "summary": "List Calls",
+        "summary": "List calls with filtering, search and sorting",
         "tags": [
           "calls"
         ]

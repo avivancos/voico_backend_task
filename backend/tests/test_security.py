@@ -1,8 +1,9 @@
 """Security tests for the current API surface — real ASGI app + real SQLite, no mocks.
 
-Scope is matched to what exists today (Task 0 + Task 1): the notes endpoint, list/detail reads,
-input validation, and the method allow-list. Each test sends a hostile or malformed input and
-asserts the app stays safe — parameterized queries, no mass-assignment, bounded input, typed
+Scope is matched to what exists today (Task 0–2): the notes endpoint, the list/filter/search/sort
+surface, input validation, and the method allow-list. Each test sends a hostile or malformed input
+and asserts the app stays safe — parameterized queries, escaped LIKE patterns, a whitelisted sort
+column, no mass-assignment, bounded input (no bulk extraction, no integer overflow), typed
 path/query, hostile unicode handled. New attack surface (the webhook/AI of Task 4) gets its own
 security tests when built.
 """
@@ -14,8 +15,10 @@ from app.modules.calls.schema import Call, CallStatus
 
 
 async def _insert_call(session_factory, **overrides) -> Call:
+    overrides.setdefault("phone_number", "+1 (555) 000-0000")
+    overrides.setdefault("status", CallStatus.in_progress)
     async with session_factory() as session:
-        call = Call(phone_number="+1 (555) 000-0000", status=CallStatus.in_progress, **overrides)
+        call = Call(**overrides)
         session.add(call)
         await session.commit()
         await session.refresh(call)
@@ -97,3 +100,74 @@ async def test_hostile_unicode_round_trips_without_corruption(client, session_fa
     assert resp.json()["notes"] == expected
     got = await client.get(f"/api/calls/{call.id}")
     assert got.json()["notes"] == expected
+
+
+# --- list / filter / search / sort surface (Task 2) -----------------------------------------
+
+
+async def test_sql_injection_in_caller_name_filter_is_literal_not_executed(client, session_factory):
+    await _insert_call(session_factory, caller_name="Alice")
+    await _insert_call(session_factory, caller_name="Bob")
+
+    # The classic tautology: if the term were concatenated into SQL, OR '1'='1 would return everyone.
+    resp = await client.get("/api/calls", params={"caller_name": "' OR '1'='1"})
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0  # matched as a literal substring -> nobody, not everyone
+
+    # A destructive payload: it is bound as a parameter, so the table is still here afterwards.
+    drop = await client.get("/api/calls", params={"caller_name": "x'; DROP TABLE calls;--"})
+    assert drop.status_code == 200
+    assert (await client.get("/api/calls")).json()["total"] == 2  # table intact, rows queryable
+
+
+async def test_like_wildcards_in_caller_name_cannot_broaden_the_match(client, session_factory):
+    # If `_` were an unescaped LIKE wildcard, it would match any single character (every row). It is
+    # escaped, so it only matches a literal underscore.
+    underscore = await _insert_call(session_factory, caller_name="a_b")
+    await _insert_call(session_factory, caller_name="axb")
+    await _insert_call(session_factory, caller_name="ab")
+
+    resp = await client.get("/api/calls", params={"caller_name": "_"})
+    assert resp.status_code == 200
+    assert {r["id"] for r in resp.json()["data"]} == {str(underscore.id)}
+
+
+async def test_phone_filter_injection_is_neutralized_by_digit_normalization(
+    client, session_factory
+):
+    row = await _insert_call(session_factory, phone_number="+1 (555) 201-4832")
+
+    # No digits in the payload -> the phone filter degrades to "no filter"; nothing is executed.
+    resp = await client.get("/api/calls", params={"phone": "'; DROP TABLE calls;--"})
+    assert resp.status_code == 200
+    assert any(r["id"] == str(row.id) for r in resp.json()["data"])
+    assert (await client.get("/api/calls")).json()["total"] == 1  # table untouched
+
+
+async def test_page_size_is_capped_to_prevent_bulk_extraction(client):
+    # An attacker cannot pull the whole table in one request; the page size is bounded.
+    assert (await client.get("/api/calls", params={"page_size": 100_000})).status_code == 422
+    assert (await client.get("/api/calls", params={"page_size": 0})).status_code == 422
+
+
+async def test_no_hostile_list_query_param_yields_a_500(client, session_factory):
+    # The invariant: every hostile filter/sort/paging input is either handled safely (200) or
+    # rejected at the boundary (422) — never a 500 — and the table survives all of them.
+    await _insert_call(session_factory, caller_name="Alice")
+    hostile = [
+        {"caller_name": "Robert'); DROP TABLE calls;--"},
+        {"phone": "%' OR 1=1 --"},
+        {"label": "Sales inquiry' OR '1'='1"},
+        {"status": "success'--"},
+        {"sort_by": "id; DROP TABLE calls"},
+        {"sort_dir": "asc); DELETE FROM calls;--"},
+        {"min_duration": "99999999999999999999999"},
+        {"max_duration": "-1"},
+        {"page": "99999999999999999999999"},
+        {"page_size": "100000"},
+    ]
+    for params in hostile:
+        resp = await client.get("/api/calls", params=params)
+        assert resp.status_code in (200, 422), f"{params} -> {resp.status_code}"
+
+    assert (await client.get("/api/calls")).json()["total"] == 1  # survived every attack

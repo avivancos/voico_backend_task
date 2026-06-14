@@ -23,6 +23,28 @@ class CallLabel(str, Enum):
     other = "Other"
 
 
+class CallSortField(str, Enum):
+    """Whitelist of columns the list endpoint may sort by.
+
+    Closed by construction: an unknown value is a 422 at the HTTP boundary, so the sort column can
+    never be interpolated from arbitrary input. Internal/audit columns (raw_transcript, notes, the
+    Task 4 queue columns) are deliberately absent — they are neither public nor sortable.
+    """
+
+    created_at = "created_at"
+    started_at = "started_at"
+    duration_seconds = "duration_seconds"
+    caller_name = "caller_name"
+    phone_number = "phone_number"
+    status = "status"
+    label = "label"
+
+
+class SortDir(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
 class Call(SQLModel, table=True):
     __tablename__ = "calls"
 
@@ -32,11 +54,11 @@ class Call(SQLModel, table=True):
         index=True,
     )
     phone_number: str = Field(index=True)
-    caller_name: Optional[str] = Field(default=None)
-    duration_seconds: Optional[int] = Field(default=None)
+    caller_name: Optional[str] = Field(default=None, index=True)
+    duration_seconds: Optional[int] = Field(default=None, index=True)
     status: CallStatus = Field(default=CallStatus.in_progress, index=True)
     summary: Optional[str] = Field(default=None)
-    label: Optional[CallLabel] = Field(default=None)
+    label: Optional[CallLabel] = Field(default=None, index=True)
     started_at: datetime = Field(
         default_factory=datetime.utcnow,
         sa_column=Column(DateTime, nullable=False),
@@ -47,7 +69,7 @@ class Call(SQLModel, table=True):
     )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
-        sa_column=Column(DateTime, nullable=False),
+        sa_column=Column(DateTime, nullable=False, index=True),
     )
     updated_at: datetime = Field(
         default_factory=datetime.utcnow,

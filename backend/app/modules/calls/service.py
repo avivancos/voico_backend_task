@@ -9,9 +9,12 @@ from app.core.time import now_utc
 from app.modules.calls.repository import CallRepository
 from app.modules.calls.schema import (
     CallCounts,
+    CallLabel,
     CallResponse,
+    CallSortField,
     CallStatus,
     PaginatedCallsResponse,
+    SortDir,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,12 +34,29 @@ class CallService:
 
     async def list_calls(
         self,
-        status: Optional[CallStatus],
-        page: int,
-        page_size: int,
+        *,
+        status: Optional[CallStatus] = None,
+        caller_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        label: Optional[CallLabel] = None,
+        min_duration: Optional[int] = None,
+        max_duration: Optional[int] = None,
+        sort_by: CallSortField = CallSortField.created_at,
+        sort_dir: SortDir = SortDir.desc,
+        page: int = 1,
+        page_size: int = 20,
     ) -> PaginatedCallsResponse:
         calls, total, total_pages, counts = await self.repository.list_calls(
-            status, page, page_size
+            status=status,
+            caller_name=caller_name,
+            phone=phone,
+            label=label,
+            min_duration=min_duration,
+            max_duration=max_duration,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            page=page,
+            page_size=page_size,
         )
         return PaginatedCallsResponse(
             data=[CallResponse.model_validate(c, from_attributes=True) for c in calls],
