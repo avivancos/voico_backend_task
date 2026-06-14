@@ -26,6 +26,8 @@ jobs:
           uv run python scripts/export_openapi.py
           cd ..
           git diff --exit-code docs/api/openapi.json
+      - name: Dependency audit (no known CVEs)
+        run: uv run --with pip-audit pip-audit
 
   frontend:
     runs-on: ubuntu-latest
@@ -43,6 +45,8 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test
+      - name: Production dependency audit (fail on high+ that ships)
+        run: npm audit --omit=dev --audit-level=high
 
   docker:
     runs-on: ubuntu-latest
