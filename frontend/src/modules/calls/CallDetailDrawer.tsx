@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { X, Phone, User, Clock, Calendar, FileText, Sparkles } from "lucide-react";
+import { X, Phone, User, Clock, Calendar, FileText, Sparkles, StickyNote, Pencil, Loader2 } from "lucide-react";
 import { StatusBadge } from "./CallsTable";
-import type { Call } from "@/types/calls";
+import { callsApi } from "@/services/api";
+import type { Call, PaginatedCallsResponse } from "@/types/calls";
 
 interface CallDetailDrawerProps {
   call: Call | null;
@@ -33,6 +36,142 @@ function formatDuration(seconds: number | null): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return m > 0 ? `${m} min ${s} sec` : `${s} sec`;
+}
+
+/**
+ * Inline-editable notes. Saving updates the UI immediately (optimistic) and rolls back if the
+ * request fails; the calls list cache is patched on success so the table stays in sync.
+ */
+export function NotesSection({ call }: { call: Call }) {
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(call.notes ?? "");
+  const [displayNotes, setDisplayNotes] = useState<string | null>(call.notes);
+
+  // When a different call is opened (or its note changes upstream), resync the editor.
+  useEffect(() => {
+    setDisplayNotes(call.notes);
+    setDraft(call.notes ?? "");
+    setIsEditing(false);
+  }, [call.id, call.notes]);
+
+  const mutation = useMutation({
+    mutationFn: (notes: string) => callsApi.updateNotes(call.id, notes),
+  });
+
+  // Optimistic update with rollback, kept in the handler so the mutation's rejection is always
+  // awaited and handled here (no lifecycle callbacks → no stray unhandled rejection in tests).
+  async function save() {
+    const previous = displayNotes;
+    const optimistic = draft.trim() ? draft.trim() : null;
+    setDisplayNotes(optimistic);
+    setIsEditing(false);
+    try {
+      const updated = await mutation.mutateAsync(draft);
+      setDisplayNotes(updated.notes);
+      // Patch the list cache so the table reflects the change, then resync from the server.
+      queryClient.setQueriesData<PaginatedCallsResponse>({ queryKey: ["calls"] }, (old) =>
+        old ? { ...old, data: old.data.map((c) => (c.id === updated.id ? updated : c)) } : old,
+      );
+      queryClient.invalidateQueries({ queryKey: ["calls"] });
+    } catch {
+      setDisplayNotes(previous); // rollback
+    }
+  }
+
+  function cancel() {
+    setDraft(displayNotes ?? "");
+    setIsEditing(false);
+    mutation.reset();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      save();
+    }
+  }
+
+  return (
+    <div className="px-6 py-4 border-t border-border">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <StickyNote className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Notes</h3>
+        </div>
+        {!isEditing && (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            aria-label="Edit notes"
+            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {isEditing ? (
+        <div>
+          <textarea
+            aria-label="Call notes"
+            autoFocus
+            maxLength={2000}
+            rows={4}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Add a note…"
+            className="w-full rounded-md border border-border bg-white p-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#FDDF5C]"
+          />
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={cancel}
+              disabled={mutation.isPending}
+              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={mutation.isPending}
+              aria-label="Save notes"
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60"
+              style={{ backgroundColor: "#FDDF5C", color: "#4a3800" }}
+            >
+              {mutation.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+              Save
+            </button>
+          </div>
+        </div>
+      ) : displayNotes ? (
+        <button
+          type="button"
+          onClick={() => setIsEditing(true)}
+          className="block w-full text-left text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap break-words rounded-md px-1 -mx-1 py-0.5 hover:bg-muted/50 transition-colors"
+        >
+          {displayNotes}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setIsEditing(true)}
+          className="text-sm italic text-muted-foreground/70 hover:text-foreground transition-colors"
+        >
+          Add a note…
+        </button>
+      )}
+
+      {mutation.isError && (
+        <p className="mt-2 text-xs text-red-500">Couldn’t save — your note was reverted.</p>
+      )}
+    </div>
+  );
 }
 
 export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
@@ -101,6 +240,8 @@ export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
             />
           )}
         </div>
+
+        <NotesSection call={call} />
 
         {/* AI Summary */}
         {call.summary && (

@@ -19,6 +19,7 @@ PUBLIC_FIELDS = {
     "created_at",
     "updated_at",
     "raw_transcript",
+    "notes",
 }
 
 

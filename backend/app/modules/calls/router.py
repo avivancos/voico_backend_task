@@ -11,6 +11,7 @@ from app.modules.calls.schema import (
     CallResponse,
     CallStatus,
     PaginatedCallsResponse,
+    UpdateCallNotesRequest,
     WebhookCallPayload,
 )
 from app.modules.calls.service import CallService
@@ -48,6 +49,27 @@ async def get_call(
     service: Annotated[CallService, Depends(get_call_service)],
 ) -> CallResponse:
     return await service.get_call(call_id)
+
+
+@router.patch(
+    "/calls/{call_id}/notes",
+    response_model=CallResponse,
+    summary="Update call notes",
+    responses={404: {"description": "Call not found"}},
+)
+@session_manager
+async def update_call_notes(
+    call_id: uuid.UUID,
+    payload: UpdateCallNotesRequest,
+    session: SessionDep,
+    service: Annotated[CallService, Depends(get_call_service)],
+) -> CallResponse:
+    """Set or clear the free-text note on a call.
+
+    Send ``{"notes": "..."}`` to set it, ``{"notes": null}`` (or a blank string) to clear it. The
+    note is NFC-normalized and trimmed; an absent ``notes`` key is rejected with 422.
+    """
+    return await service.update_notes(call_id, payload.notes)
 
 
 @router.post("/webhook/call", response_model=CallResponse)

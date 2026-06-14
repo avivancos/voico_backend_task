@@ -20,4 +20,9 @@ export const callsApi = {
     const { data } = await apiClient.get<Call>(`/calls/${id}`);
     return data;
   },
+
+  updateNotes: async (id: string, notes: string | null): Promise<Call> => {
+    const { data } = await apiClient.patch<Call>(`/calls/${id}/notes`, { notes });
+    return data;
+  },
 };

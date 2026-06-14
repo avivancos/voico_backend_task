@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Annotated, Optional
 
+from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import Text
 from sqlmodel import Column, DateTime, Field, SQLModel
 
 
@@ -52,6 +54,8 @@ class Call(SQLModel, table=True):
         sa_column=Column(DateTime, nullable=False),
     )
     raw_transcript: Optional[str] = Field(default=None)
+    # Free-text user annotation (Task 1). No index — it is never filtered or sorted on.
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 # --- Request / Response schemas ---
@@ -63,6 +67,21 @@ class WebhookCallPayload(SQLModel):
     duration_seconds: Optional[int] = None
     raw_transcript: Optional[str] = None
     ended_at: Optional[datetime] = None
+
+
+class UpdateCallNotesRequest(BaseModel):
+    """Required-but-nullable notes payload.
+
+    The ``notes`` key must be present — an empty body ``{}`` is a 422. An explicit ``null`` (or a
+    blank/whitespace string, normalized in the service) clears the note. The 2000-character cap is
+    enforced here, before normalization. ``extra="forbid"`` makes the model fail-closed: any extra
+    field (e.g. an attempt to over-post ``status``/``summary``) is rejected with 422, so this
+    endpoint can never become a mass-assignment vector.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    notes: Optional[Annotated[str, StringConstraints(max_length=2000)]]
 
 
 class CallResponse(SQLModel):
@@ -78,6 +97,7 @@ class CallResponse(SQLModel):
     created_at: datetime
     updated_at: datetime
     raw_transcript: Optional[str]
+    notes: Optional[str]
 
 
 class CallCounts(SQLModel):

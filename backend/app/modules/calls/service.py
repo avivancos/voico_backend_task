@@ -1,9 +1,11 @@
 import logging
+import unicodedata
 import uuid
 from typing import Optional
 
 from fastapi import HTTPException, status
 
+from app.core.time import now_utc
 from app.modules.calls.repository import CallRepository
 from app.modules.calls.schema import (
     CallCounts,
@@ -13,6 +15,14 @@ from app.modules.calls.schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_notes(notes: Optional[str]) -> Optional[str]:
+    """NFC-normalize and strip; treat null/empty/whitespace-only as "no note" (NULL)."""
+    if notes is None:
+        return None
+    cleaned = unicodedata.normalize("NFC", notes).strip()
+    return cleaned or None
 
 
 class CallService:
@@ -45,4 +55,17 @@ class CallService:
         call = await self.repository.get_by_id(call_id)
         if call is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Call not found")
+        return CallResponse.model_validate(call, from_attributes=True)
+
+    async def update_notes(self, call_id: uuid.UUID, notes: Optional[str]) -> CallResponse:
+        call = await self.repository.get_by_id(call_id)
+        if call is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Call not found")
+        normalized = _normalize_notes(notes)
+        if normalized != call.notes:
+            # Only touch the row when the note actually changes, so a redundant save does not
+            # re-stamp updated_at. No DB-level onupdate — each real writer bumps it explicitly.
+            call.notes = normalized
+            call.updated_at = now_utc()
+            await self.repository.update(call)
         return CallResponse.model_validate(call, from_attributes=True)

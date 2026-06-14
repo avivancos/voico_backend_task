@@ -90,6 +90,17 @@
               }
             ]
           },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
           "phone_number": {
             "title": "Phone Number",
             "type": "string"
@@ -142,7 +153,8 @@
           "ended_at",
           "created_at",
           "updated_at",
-          "raw_transcript"
+          "raw_transcript",
+          "notes"
         ],
         "title": "CallResponse",
         "type": "object"
@@ -207,6 +219,29 @@
           "counts"
         ],
         "title": "PaginatedCallsResponse",
+        "type": "object"
+      },
+      "UpdateCallNotesRequest": {
+        "additionalProperties": false,
+        "description": "Required-but-nullable notes payload.\n\nThe ``notes`` key must be present \u2014 an empty body ``{}`` is a 422. An explicit ``null`` (or a\nblank/whitespace string, normalized in the service) clears the note. The 2000-character cap is\nenforced here, before normalization. ``extra=\"forbid\"`` makes the model fail-closed: any extra\nfield (e.g. an attempt to over-post ``status``/``summary``) is rejected with 422, so this\nendpoint can never become a mass-assignment vector.",
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "required": [
+          "notes"
+        ],
+        "title": "UpdateCallNotesRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -420,6 +455,63 @@
           }
         },
         "summary": "Get Call",
+        "tags": [
+          "calls"
+        ]
+      }
+    },
+    "/api/calls/{call_id}/notes": {
+      "patch": {
+        "description": "Set or clear the free-text note on a call.\n\nSend ``{\"notes\": \"...\"}`` to set it, ``{\"notes\": null}`` (or a blank string) to clear it. The\nnote is NFC-normalized and trimmed; an absent ``notes`` key is rejected with 422.",
+        "operationId": "update_call_notes_api_calls__call_id__notes_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "call_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Call Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCallNotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Call not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update call notes",
         "tags": [
           "calls"
         ]

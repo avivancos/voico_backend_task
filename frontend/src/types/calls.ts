@@ -13,6 +13,7 @@ export interface Call {
   created_at: string;
   updated_at: string;
   raw_transcript: string | null;
+  notes: string | null;
 }
 
 export interface CallCounts {
