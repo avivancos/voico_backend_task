@@ -44,7 +44,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - run: npm test
+      - run: npm run test:cov
       - name: Production dependency audit (fail on high+ that ships)
         run: npm audit --omit=dev --audit-level=high
 
