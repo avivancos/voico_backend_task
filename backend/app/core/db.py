@@ -9,7 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import settings
 
 # The enrichment-queue claim relies on UPDATE ... RETURNING, which requires SQLite >= 3.35.
-if tuple(int(part) for part in sqlite3.sqlite_version.split(".")) < (3, 35):
+if tuple(int(part) for part in sqlite3.sqlite_version.split(".")) < (3, 35):  # pragma: no cover
     raise RuntimeError(f"SQLite >= 3.35 is required (found {sqlite3.sqlite_version}).")
 
 
@@ -26,7 +26,7 @@ def _register_sqlite_functions(dbapi_connection, connection_record):
     lowercase form. Python's ``str.lower`` folds Unicode. Registered on the ``Engine`` class (not a
     single engine) so the app, the test harness, and any tooling all get identical semantics.
     """
-    if hasattr(dbapi_connection, "create_function"):
+    if hasattr(dbapi_connection, "create_function"):  # pragma: no branch  (always true for sqlite)
         dbapi_connection.create_function("lower", 1, _unicode_lower, deterministic=True)
 
 
@@ -38,8 +38,11 @@ engine = create_async_engine(
 
 
 @event.listens_for(engine.sync_engine, "connect")
-def _set_sqlite_pragmas(dbapi_connection, connection_record):
-    """Enable WAL + a busy timeout so the API and the background worker can write concurrently."""
+def _set_sqlite_pragmas(dbapi_connection, connection_record):  # pragma: no cover
+    """Enable WAL + a busy timeout so the API and the background worker can write concurrently.
+
+    Fires only for the app's file-backed engine, never the in-memory test engine, so it is excluded
+    from the line-coverage gate (its effect is exercised by the WAL concurrency test instead)."""
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=5000")

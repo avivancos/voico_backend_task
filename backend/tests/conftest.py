@@ -5,6 +5,9 @@ overridden to use the per-test engine, and the app runs through its real lifespa
 ``asgi-lifespan`` so background wiring is exercised the same way as in production.
 """
 
+import os
+from datetime import timedelta
+
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
@@ -16,9 +19,16 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-import app.database.models  # noqa: F401  (registers all ORM models on SQLModel.metadata)
-from app.main import app
-from app.modules.calls.router import get_session
+# Run tests on pure defaults: disable the .env source BEFORE the app (and its Settings singleton) is
+# imported below, so a developer's local backend/.env can never change a test outcome. CI already
+# ships no .env; this makes local runs match it.
+os.environ.setdefault("ENV_FILE", "")
+
+import app.database.models  # noqa: E402, F401  (registers all ORM models on SQLModel.metadata)
+from app.core.time import now_utc  # noqa: E402
+from app.main import app  # noqa: E402
+from app.modules.calls.router import get_session  # noqa: E402
+from app.modules.calls.schema import Call, CallStatus  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -38,6 +48,29 @@ async def engine():
 @pytest_asyncio.fixture
 async def session_factory(engine):
     return sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+def make_call(session_factory):
+    """Insert a Call with sensible defaults and return it. Override any column via keyword; use
+    ``minutes_ago`` (relative to ``now``, default the app clock) to place ``started_at``/``created_at``
+    in the past. Replaces the per-file insert helpers so every test seeds calls the same way."""
+
+    async def _make(*, minutes_ago=None, now=None, **overrides) -> Call:
+        fields: dict = {"phone_number": "+1 (555) 000-0000", "status": CallStatus.success}
+        fields.update(overrides)
+        if minutes_ago is not None:
+            timestamp = (now if now is not None else now_utc()) - timedelta(minutes=minutes_ago)
+            fields.setdefault("started_at", timestamp)
+            fields.setdefault("created_at", timestamp)
+        async with session_factory() as session:
+            call = Call(**fields)
+            session.add(call)
+            await session.commit()
+            await session.refresh(call)
+            return call
+
+    return _make
 
 
 @pytest_asyncio.fixture

@@ -25,6 +25,22 @@ make test                   # full suite in the sanctioned container (compose --
 make lint type              # ruff + mypy (backend) + eslint + tsc (frontend)
 ```
 
+## Test architecture
+
+No mocks of our own code (see [ADR-0006](adr/0006-test-architecture.md)). Backend: real ASGI + real
+SQLite. Frontend: the network boundary is faked with **MSW**, so the real `api.ts` runs.
+
+- **Coverage is gated.** Backend `--cov-fail-under=100` (line + branch); frontend v8 thresholds
+  (lines/statements ≥90, branches/functions ≥85). The backend config sets
+  `concurrency = ["thread", "greenlet"]` — required to measure the async/greenlet request path.
+- **Markers** (`unit`, `integration`, `security`, `property`, `contract`) run subsets, e.g.
+  `uv --directory backend run pytest -m security`. `--strict-markers` rejects typos.
+- **Shared factories:** one `make_call` fixture (backend) and `makeCall`/`pageOf`/`renderWithProviders`
+  in `frontend/src/test-utils.tsx` — no per-file copies.
+- **Property tests** (Hypothesis) cover the pure helpers (`_escape_like`, `_phone_digits`, `is_expired`).
+- **Mutation testing** is informational, not a gate: `make mutate` runs `mutmut` over
+  `app/modules/calls/`. Baseline score: _run `make mutate` and record the killed/total here._
+
 ## How to verify a change
 
 - `make test` and the `docker compose --profile test` run are green.

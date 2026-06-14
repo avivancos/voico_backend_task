@@ -42,6 +42,16 @@ secure, and defensible line-by-line — not just "works on my machine".
 - **Zero mocks** of our own code or external dependencies. OpenAI is exercised through an
   `Enricher` protocol with a **recorded fixture** — never by monkeypatching the SDK. SQLite runs
   for real (WAL) in tests.
+- **100% line + branch coverage is non-negotiable, achieved *without mocks*.** The backend gate is
+  `--cov-fail-under=100` (CI-enforced); reaching it by faking collaborators is forbidden — cover real
+  code paths with real tests (real SQLite, real ASGI). The only admissible exclusions are
+  `# pragma: no cover` on genuinely-unreachable bootstrap guards (e.g. an "impossible" version check),
+  each with a one-line justification — never to paper over untested logic. Note: measuring the async
+  request path requires `concurrency = ["thread", "greenlet"]` in coverage config (SQLAlchemy's async
+  layer runs through greenlets), else covered code falsely reports as uncovered.
+- On the **frontend**, "no mocks of our own code" means the network boundary is mocked with **MSW**
+  (the real `api.ts`/axios runs), never `vi.mock` of our own modules for the API layer; component
+  tests keep a realistic coverage floor.
 - **Inject the clock** (`now`) and any seeds — no `sleep`, no nondeterminism.
 - Cover error branches (4xx/5xx, null, invalid enum), not only the happy path.
 - Every feature ships **≥1 negative test** that a naive implementation would fail (concurrency,

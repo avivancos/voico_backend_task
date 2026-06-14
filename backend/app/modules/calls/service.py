@@ -1,6 +1,7 @@
 import logging
 import unicodedata
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -76,6 +77,10 @@ class CallService:
         if call is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Call not found")
         return CallResponse.model_validate(call, from_attributes=True)
+
+    async def expire_stale_calls(self, *, now: datetime, threshold_minutes: float) -> int:
+        """Mark calls stuck in_progress past the threshold as failed; return how many changed."""
+        return await self.repository.expire_stale(now=now, threshold_minutes=threshold_minutes)
 
     async def update_notes(self, call_id: uuid.UUID, notes: Optional[str]) -> CallResponse:
         call = await self.repository.get_by_id(call_id)

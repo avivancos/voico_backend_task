@@ -9,20 +9,15 @@ import unicodedata
 import uuid
 from datetime import datetime
 
+import pytest
+
 from app.modules.calls.schema import Call, CallStatus
 
-
-async def _insert_call(session_factory, **overrides) -> Call:
-    async with session_factory() as session:
-        call = Call(phone_number="+1 (555) 000-0000", status=CallStatus.success, **overrides)
-        session.add(call)
-        await session.commit()
-        await session.refresh(call)
-        return call
+pytestmark = pytest.mark.integration
 
 
-async def test_set_notes_strips_and_persists(client, session_factory):
-    call = await _insert_call(session_factory)
+async def test_set_notes_strips_and_persists(client, make_call):
+    call = await make_call()
     resp = await client.patch(
         f"/api/calls/{call.id}/notes", json={"notes": "  Follow up next week  "}
     )
@@ -34,36 +29,36 @@ async def test_set_notes_strips_and_persists(client, session_factory):
     assert got.json()["notes"] == "Follow up next week"
 
 
-async def test_set_notes_normalizes_to_nfc(client, session_factory):
-    call = await _insert_call(session_factory)
-    decomposed = "Café meeting"  # "e" + combining acute accent
+async def test_set_notes_normalizes_to_nfc(client, make_call):
+    call = await make_call()
+    decomposed = "Café meeting"  # "e" + combining acute accent
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": decomposed})
     assert resp.status_code == 200
     assert resp.json()["notes"] == unicodedata.normalize("NFC", decomposed) == "Café meeting"
 
 
-async def test_clear_notes_with_explicit_null(client, session_factory):
-    call = await _insert_call(session_factory, notes="something")
+async def test_clear_notes_with_explicit_null(client, make_call):
+    call = await make_call(notes="something")
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": None})
     assert resp.status_code == 200
     assert resp.json()["notes"] is None
 
 
-async def test_blank_notes_normalize_to_null(client, session_factory):
-    call = await _insert_call(session_factory, notes="something")
+async def test_blank_notes_normalize_to_null(client, make_call):
+    call = await make_call(notes="something")
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": "   "})
     assert resp.status_code == 200
     assert resp.json()["notes"] is None
 
 
-async def test_missing_notes_field_is_422(client, session_factory):
-    call = await _insert_call(session_factory)
+async def test_missing_notes_field_is_422(client, make_call):
+    call = await make_call()
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={})
     assert resp.status_code == 422
 
 
-async def test_notes_at_max_length_ok_but_over_is_422(client, session_factory):
-    call = await _insert_call(session_factory)
+async def test_notes_at_max_length_ok_but_over_is_422(client, make_call):
+    call = await make_call()
     ok = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": "x" * 2000})
     assert ok.status_code == 200
     over = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": "x" * 2001})
@@ -75,27 +70,25 @@ async def test_patch_unknown_call_is_404(client):
     assert resp.status_code == 404
 
 
-async def test_setting_notes_advances_updated_at(client, session_factory):
+async def test_setting_notes_advances_updated_at(client, make_call):
     old = datetime(2000, 1, 1, 0, 0, 0)
-    call = await _insert_call(session_factory, started_at=old, created_at=old, updated_at=old)
+    call = await make_call(started_at=old, created_at=old, updated_at=old)
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": "touch"})
     assert resp.status_code == 200
     assert datetime.fromisoformat(resp.json()["updated_at"]) > old
 
 
-async def test_notes_present_in_list_payload(client, session_factory):
-    await _insert_call(session_factory, notes="visible in list")
+async def test_notes_present_in_list_payload(client, make_call):
+    await make_call(notes="visible in list")
     resp = await client.get("/api/calls")
     assert resp.status_code == 200
     assert any(row.get("notes") == "visible in list" for row in resp.json()["data"])
 
 
-async def test_setting_identical_note_is_noop_and_does_not_bump_updated_at(client, session_factory):
+async def test_setting_identical_note_is_noop_and_does_not_bump_updated_at(client, make_call):
     # A save that doesn't actually change the (normalized) note must NOT re-stamp updated_at.
     old = datetime(2000, 1, 1, 0, 0, 0)
-    call = await _insert_call(
-        session_factory, notes="keep me", started_at=old, created_at=old, updated_at=old
-    )
+    call = await make_call(notes="keep me", started_at=old, created_at=old, updated_at=old)
     # Same note, only differing by surrounding whitespace -> normalizes equal -> no-op.
     resp = await client.patch(f"/api/calls/{call.id}/notes", json={"notes": "  keep me  "})
     assert resp.status_code == 200
@@ -111,6 +104,7 @@ async def test_notes_write_is_column_scoped_and_survives_concurrent_update(tmp_p
     UPDATE writing ``notes`` names neither ``status`` nor ``summary`` — a full-row-write regression
     in ``update_notes``/``repository.update`` would fail it. We also confirm the concurrent write
     survives end-to-end. The write goes through the REAL service, not a hand-rolled session.
+    This test intentionally builds its own file-backed WAL engine, so it does not use ``make_call``.
     (``updated_at`` is a shared last-writer-wins column and is intentionally not asserted.)
     """
     from sqlalchemy import event

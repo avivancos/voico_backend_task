@@ -1,6 +1,6 @@
 # Voico Calls Dashboard — developer tasks. Backend: uv. Frontend: npm.
 .DEFAULT_GOAL := help
-.PHONY: help up down logs test test-back test-front lint type fmt migrate seed openapi
+.PHONY: help up down logs test test-back test-front lint type fmt migrate seed openapi mutate
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -41,3 +41,7 @@ seed: ## Seed sample data
 
 openapi: ## Regenerate docs/api/openapi.json
 	uv --directory backend run python scripts/export_openapi.py
+
+mutate: ## Mutation-test the calls module (slow; NOT a CI gate — see docs/ENGINEERING.md)
+	uv --directory backend run mutmut run --paths-to-mutate app/modules/calls/ || true
+	uv --directory backend run mutmut results

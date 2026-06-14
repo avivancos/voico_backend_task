@@ -1,8 +1,10 @@
 import math
 import re
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from sqlalchemy import update
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -28,6 +30,12 @@ _PHONE_SEPARATORS = (" ", "(", ")", "-", "+", ".", "/")
 def _escape_like(term: str) -> str:
     """Escape LIKE/ILIKE metacharacters so user input is matched literally, not as a pattern."""
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _phone_digits(value: str) -> str:
+    """Reduce a phone string to its bare digits — the normalized form both the stored column and the
+    query are compared on, so formatting (spaces, dashes, parens, +) is irrelevant."""
+    return re.sub(r"\D", "", value)
 
 
 def _phone_digits_expr(column: Any) -> Any:
@@ -69,7 +77,7 @@ class CallRepository:
             filters.append(caller_col.ilike(pattern, escape="\\"))
 
         if phone:
-            digits = re.sub(r"\D", "", phone)
+            digits = _phone_digits(phone)
             if digits:  # a non-digit-only search term degrades to "no phone filter"
                 filters.append(_phone_digits_expr(phone_col).like(f"%{digits}%"))
 
@@ -145,3 +153,25 @@ class CallRepository:
         await self.session.flush()
         await self.session.refresh(call)
         return call
+
+    async def expire_stale(self, *, now: datetime, threshold_minutes: float) -> int:
+        """Force-fail every call that has sat in_progress past the threshold, in one statement.
+
+        A set-based UPDATE (no per-row loop), so the cost is a single round-trip no matter how many
+        rows match. ``synchronize_session=False`` since the session's identity map isn't reused after
+        this. Returns the number of rows changed (0 on a no-op / second run).
+        """
+        cutoff = now - timedelta(minutes=threshold_minutes)
+        status_col: Any = Call.status
+        started_col: Any = Call.started_at
+        stmt = (
+            update(Call)
+            .where(status_col == CallStatus.in_progress, started_col < cutoff)
+            .values(status=CallStatus.failed, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        # Idiomatic SQLAlchemy 2.0 bulk UPDATE through the ORM session; the caller commits. One
+        # statement, no per-row work. synchronize_session=False since we don't reuse the identity map.
+        result: Any = await self.session.execute(stmt)
+        await self.session.flush()
+        return int(result.rowcount or 0)

@@ -9,40 +9,12 @@ lock the correct behavior in.
 
 import uuid
 
+import pytest
 from sqlalchemy import text
 
-from app.modules.calls.schema import Call, CallLabel, CallStatus
+from app.modules.calls.schema import CallLabel, CallStatus
 
-
-async def _insert(
-    session_factory,
-    *,
-    id=None,
-    phone_number="+1 (555) 000-0000",
-    caller_name=None,
-    duration_seconds=None,
-    status=CallStatus.success,
-    label=None,
-    created_at=None,
-) -> Call:
-    async with session_factory() as session:
-        call = Call(
-            phone_number=phone_number,
-            caller_name=caller_name,
-            duration_seconds=duration_seconds,
-            status=status,
-            label=label,
-        )
-        if id is not None:
-            call.id = id
-        if created_at is not None:
-            call.created_at = created_at
-            call.started_at = created_at
-            call.updated_at = created_at
-        session.add(call)
-        await session.commit()
-        await session.refresh(call)
-        return call
+pytestmark = pytest.mark.integration
 
 
 def _ids(body) -> set[str]:
@@ -52,27 +24,27 @@ def _ids(body) -> set[str]:
 # --- caller_name partial / case-insensitive -------------------------------------------------
 
 
-async def test_caller_name_is_partial_and_case_insensitive(client, session_factory):
-    target = await _insert(session_factory, caller_name="María García")
-    await _insert(session_factory, caller_name="Derek Owens")
+async def test_caller_name_is_partial_and_case_insensitive(client, make_call):
+    target = await make_call(caller_name="María García")
+    await make_call(caller_name="Derek Owens")
 
     resp = await client.get("/api/calls", params={"caller_name": "garc"})
     assert resp.status_code == 200
     assert _ids(resp.json()) == {str(target.id)}
 
 
-async def test_empty_caller_name_is_ignored_not_a_filter(client, session_factory):
-    a = await _insert(session_factory, caller_name="Someone")
-    b = await _insert(session_factory, caller_name=None)
+async def test_empty_caller_name_is_ignored_not_a_filter(client, make_call):
+    a = await make_call(caller_name="Someone")
+    b = await make_call(caller_name=None)
 
     resp = await client.get("/api/calls", params={"caller_name": ""})
     assert resp.status_code == 200
     assert _ids(resp.json()) == {str(a.id), str(b.id)}  # blank term matches everything
 
 
-async def test_caller_name_escapes_like_wildcards(client, session_factory):
-    literal = await _insert(session_factory, caller_name="50% discount desk")
-    await _insert(session_factory, caller_name="no special chars here")
+async def test_caller_name_escapes_like_wildcards(client, make_call):
+    literal = await make_call(caller_name="50% discount desk")
+    await make_call(caller_name="no special chars here")
 
     # A bare '%' must be treated as a literal, not "match anything".
     resp = await client.get("/api/calls", params={"caller_name": "%"})
@@ -83,9 +55,9 @@ async def test_caller_name_escapes_like_wildcards(client, session_factory):
 # --- phone partial, digit-normalized --------------------------------------------------------
 
 
-async def test_phone_search_ignores_formatting(client, session_factory):
-    target = await _insert(session_factory, phone_number="+1 (555) 201-4832")
-    await _insert(session_factory, phone_number="+44 20 7946 0812")
+async def test_phone_search_ignores_formatting(client, make_call):
+    target = await make_call(phone_number="+1 (555) 201-4832")
+    await make_call(phone_number="+44 20 7946 0812")
 
     # User types raw digits with no separators -> still matches the formatted stored number.
     resp = await client.get("/api/calls", params={"phone": "5552014832"})
@@ -93,9 +65,9 @@ async def test_phone_search_ignores_formatting(client, session_factory):
     assert _ids(resp.json()) == {str(target.id)}
 
 
-async def test_phone_partial_substring_matches(client, session_factory):
-    target = await _insert(session_factory, phone_number="+1 (555) 201-4832")
-    await _insert(session_factory, phone_number="+44 20 7946 0812")
+async def test_phone_partial_substring_matches(client, make_call):
+    target = await make_call(phone_number="+1 (555) 201-4832")
+    await make_call(phone_number="+44 20 7946 0812")
 
     resp = await client.get("/api/calls", params={"phone": "201"})
     assert resp.status_code == 200
@@ -105,14 +77,14 @@ async def test_phone_partial_substring_matches(client, session_factory):
 # --- label exact match: the value/name regression -------------------------------------------
 
 
-async def test_label_filter_matches_by_enum_and_returns_rows(client, session_factory):
+async def test_label_filter_matches_by_enum_and_returns_rows(client, make_call):
     """The endpoint accepts the label *value*, returns the right non-empty set, and serializes the
     value back. (This alone does NOT prove the value/name handling — see the raw-compare test below,
     where the trap actually bites.)"""
-    a = await _insert(session_factory, label=CallLabel.sales_inquiry)
-    b = await _insert(session_factory, label=CallLabel.sales_inquiry)
-    await _insert(session_factory, label=CallLabel.support)
-    await _insert(session_factory, label=None)
+    a = await make_call(label=CallLabel.sales_inquiry)
+    b = await make_call(label=CallLabel.sales_inquiry)
+    await make_call(label=CallLabel.support)
+    await make_call(label=None)
 
     resp = await client.get("/api/calls", params={"label": "Sales inquiry"})
     assert resp.status_code == 200
@@ -121,12 +93,12 @@ async def test_label_filter_matches_by_enum_and_returns_rows(client, session_fac
     assert all(row["label"] == "Sales inquiry" for row in resp.json()["data"])
 
 
-async def test_label_endpoint_is_not_a_raw_value_compare(client, session_factory):
+async def test_label_endpoint_is_not_a_raw_value_compare(client, session_factory, make_call):
     """The trap, where it actually bites: the column stores the member *name* (``sales_inquiry``),
     so a naive ``WHERE label = 'Sales inquiry'`` (the *value*) matches zero rows. Prove the endpoint
     does NOT do that — it returns the rows that the raw value-string query misses."""
-    a = await _insert(session_factory, label=CallLabel.sales_inquiry)
-    b = await _insert(session_factory, label=CallLabel.sales_inquiry)
+    a = await make_call(label=CallLabel.sales_inquiry)
+    b = await make_call(label=CallLabel.sales_inquiry)
 
     sql = text("SELECT count(*) FROM calls WHERE label = :v")
     async with session_factory() as session:
@@ -149,9 +121,9 @@ async def test_invalid_label_is_422(client):
     assert resp.status_code == 422
 
 
-async def test_label_filter_member_name_form_is_rejected(client, session_factory):
+async def test_label_filter_member_name_form_is_rejected(client, make_call):
     # The stored representation ('sales_inquiry') is NOT the API contract; only the value is.
-    await _insert(session_factory, label=CallLabel.sales_inquiry)
+    await make_call(label=CallLabel.sales_inquiry)
     resp = await client.get("/api/calls", params={"label": "sales_inquiry"})
     assert resp.status_code == 422
 
@@ -159,11 +131,11 @@ async def test_label_filter_member_name_form_is_rejected(client, session_factory
 # --- duration range -------------------------------------------------------------------------
 
 
-async def test_duration_min_max_range(client, session_factory):
-    short = await _insert(session_factory, duration_seconds=30)
-    mid = await _insert(session_factory, duration_seconds=120)
-    long = await _insert(session_factory, duration_seconds=600)
-    await _insert(session_factory, duration_seconds=None)  # NULL excluded from a range
+async def test_duration_min_max_range(client, make_call):
+    short = await make_call(duration_seconds=30)
+    mid = await make_call(duration_seconds=120)
+    long = await make_call(duration_seconds=600)
+    await make_call(duration_seconds=None)  # NULL excluded from a range
 
     resp = await client.get("/api/calls", params={"min_duration": 60, "max_duration": 300})
     assert resp.status_code == 200
@@ -189,24 +161,15 @@ async def test_negative_duration_is_422(client):
 # --- combining filters (AND) ----------------------------------------------------------------
 
 
-async def test_filters_are_anded_together(client, session_factory):
-    match = await _insert(
-        session_factory,
-        caller_name="García López",
-        status=CallStatus.success,
-        label=CallLabel.support,
+async def test_filters_are_anded_together(client, make_call):
+    match = await make_call(
+        caller_name="García López", status=CallStatus.success, label=CallLabel.support
     )
-    await _insert(
-        session_factory,
-        caller_name="García López",
-        status=CallStatus.failed,
-        label=CallLabel.support,
+    await make_call(
+        caller_name="García López", status=CallStatus.failed, label=CallLabel.support
     )  # wrong status
-    await _insert(
-        session_factory,
-        caller_name="Other Person",
-        status=CallStatus.success,
-        label=CallLabel.support,
+    await make_call(
+        caller_name="Other Person", status=CallStatus.success, label=CallLabel.support
     )  # wrong name
 
     resp = await client.get(
@@ -220,10 +183,10 @@ async def test_filters_are_anded_together(client, session_factory):
 # --- sorting --------------------------------------------------------------------------------
 
 
-async def test_sort_by_duration_asc_and_desc(client, session_factory):
-    a = await _insert(session_factory, duration_seconds=30)
-    b = await _insert(session_factory, duration_seconds=120)
-    c = await _insert(session_factory, duration_seconds=600)
+async def test_sort_by_duration_asc_and_desc(client, make_call):
+    a = await make_call(duration_seconds=30)
+    b = await make_call(duration_seconds=120)
+    c = await make_call(duration_seconds=600)
 
     resp = await client.get("/api/calls", params={"sort_by": "duration_seconds", "sort_dir": "asc"})
     order = [row["id"] for row in resp.json()["data"] if row["duration_seconds"] is not None]
@@ -243,7 +206,7 @@ async def test_invalid_sort_field_is_422(client):
         assert resp.status_code == 422, f"{bad!r} -> {resp.status_code}"
 
 
-async def test_sort_is_stable_across_pages_with_tiebreaker(client, session_factory):
+async def test_sort_is_stable_across_pages_with_tiebreaker(client, make_call):
     # All rows share the same primary sort key (status), so the `id` tiebreaker alone decides the
     # order. We give the rows explicit ids and insert them in a SHUFFLED order, so storage/insertion
     # order differs from id order. Then the only way the pages come back in id order is the
@@ -251,7 +214,7 @@ async def test_sort_is_stable_across_pages_with_tiebreaker(client, session_facto
     ids = [uuid.UUID(int=n) for n in range(1, 11)]
     insertion_order = [ids[i] for i in (7, 2, 9, 0, 5, 3, 8, 1, 6, 4)]  # not sorted
     for call_id in insertion_order:
-        await _insert(session_factory, id=call_id, status=CallStatus.success, duration_seconds=100)
+        await make_call(id=call_id, status=CallStatus.success, duration_seconds=100)
 
     pages = []
     for page in (1, 2):
@@ -270,11 +233,11 @@ async def test_sort_is_stable_across_pages_with_tiebreaker(client, session_facto
 # --- counts + N+1 ---------------------------------------------------------------------------
 
 
-async def test_counts_reflect_non_status_filters_broken_down_by_status(client, session_factory):
-    await _insert(session_factory, caller_name="García A", status=CallStatus.success)
-    await _insert(session_factory, caller_name="García B", status=CallStatus.success)
-    await _insert(session_factory, caller_name="García C", status=CallStatus.failed)
-    await _insert(session_factory, caller_name="Unrelated", status=CallStatus.success)
+async def test_counts_reflect_non_status_filters_broken_down_by_status(client, make_call):
+    await make_call(caller_name="García A", status=CallStatus.success)
+    await make_call(caller_name="García B", status=CallStatus.success)
+    await make_call(caller_name="García C", status=CallStatus.failed)
+    await make_call(caller_name="Unrelated", status=CallStatus.success)
 
     resp = await client.get("/api/calls", params={"caller_name": "garcía"})
     body = resp.json()
@@ -282,9 +245,9 @@ async def test_counts_reflect_non_status_filters_broken_down_by_status(client, s
     assert body["total"] == 3  # all García rows, every status
 
 
-async def test_total_respects_status_filter_counts_do_not(client, session_factory):
-    await _insert(session_factory, caller_name="García A", status=CallStatus.success)
-    await _insert(session_factory, caller_name="García B", status=CallStatus.failed)
+async def test_total_respects_status_filter_counts_do_not(client, make_call):
+    await make_call(caller_name="García A", status=CallStatus.success)
+    await make_call(caller_name="García B", status=CallStatus.failed)
 
     resp = await client.get("/api/calls", params={"caller_name": "garcía", "status": "success"})
     body = resp.json()
@@ -294,15 +257,15 @@ async def test_total_respects_status_filter_counts_do_not(client, session_factor
     assert all(row["status"] == "success" for row in body["data"])
 
 
-async def test_list_query_count_is_independent_of_row_count(client, session_factory, count_queries):
+async def test_list_query_count_is_independent_of_row_count(client, make_call, count_queries):
     # No N+1: the number of SQL statements for a list call must not grow with the number of rows.
-    await _insert(session_factory, caller_name="A")
+    await make_call(caller_name="A")
     before = count_queries["n"]
     await client.get("/api/calls")
     small = count_queries["n"] - before
 
     for i in range(30):
-        await _insert(session_factory, caller_name=f"bulk {i}")
+        await make_call(caller_name=f"bulk {i}")
     before = count_queries["n"]
     await client.get("/api/calls")
     large = count_queries["n"] - before
@@ -314,9 +277,9 @@ async def test_list_query_count_is_independent_of_row_count(client, session_fact
 # --- pagination interplay -------------------------------------------------------------------
 
 
-async def test_pagination_with_filter_applied(client, session_factory):
+async def test_pagination_with_filter_applied(client, make_call):
     for i in range(25):
-        await _insert(session_factory, caller_name=f"García {i:02d}", duration_seconds=i)
+        await make_call(caller_name=f"García {i:02d}", duration_seconds=i)
 
     resp = await client.get(
         "/api/calls",
@@ -339,12 +302,12 @@ async def test_pagination_with_filter_applied(client, session_factory):
 # --- hardening: case folding, boundaries, bounded inputs ------------------------------------
 
 
-async def test_caller_name_search_is_unicode_case_insensitive(client, session_factory):
+async def test_caller_name_search_is_unicode_case_insensitive(client, make_call):
     # SQLite's built-in lower() folds ASCII only; we register a Unicode-aware lower() so an
     # uppercase accented name matches its lowercase query and vice versa (real seed: "María García").
-    upper = await _insert(session_factory, caller_name="GARCÍA")
-    mixed = await _insert(session_factory, caller_name="María García")
-    await _insert(session_factory, caller_name="Derek Owens")
+    upper = await make_call(caller_name="GARCÍA")
+    mixed = await make_call(caller_name="María García")
+    await make_call(caller_name="Derek Owens")
 
     resp = await client.get("/api/calls", params={"caller_name": "garcía"})
     assert resp.status_code == 200
@@ -354,28 +317,28 @@ async def test_caller_name_search_is_unicode_case_insensitive(client, session_fa
     assert _ids(resp.json()) == {str(mixed.id)}
 
 
-async def test_whitespace_only_caller_name_is_ignored(client, session_factory):
-    a = await _insert(session_factory, caller_name="Someone")
-    b = await _insert(session_factory, caller_name=None)
+async def test_whitespace_only_caller_name_is_ignored(client, make_call):
+    a = await make_call(caller_name="Someone")
+    b = await make_call(caller_name=None)
 
     resp = await client.get("/api/calls", params={"caller_name": "   "})
     assert resp.status_code == 200
     assert _ids(resp.json()) == {str(a.id), str(b.id)}  # blanks degrade to "no filter", not 0 rows
 
 
-async def test_non_digit_phone_term_is_ignored(client, session_factory):
-    a = await _insert(session_factory, phone_number="+1 (555) 201-4832")
-    b = await _insert(session_factory, phone_number="+44 20 7946 0812")
+async def test_non_digit_phone_term_is_ignored(client, make_call):
+    a = await make_call(phone_number="+1 (555) 201-4832")
+    b = await make_call(phone_number="+44 20 7946 0812")
 
     resp = await client.get("/api/calls", params={"phone": "abc"})
     assert resp.status_code == 200
     assert _ids(resp.json()) == {str(a.id), str(b.id)}  # nothing to match on -> filter skipped
 
 
-async def test_duration_equal_bound_is_inclusive(client, session_factory):
-    exact = await _insert(session_factory, duration_seconds=120)
-    await _insert(session_factory, duration_seconds=119)
-    await _insert(session_factory, duration_seconds=121)
+async def test_duration_equal_bound_is_inclusive(client, make_call):
+    exact = await make_call(duration_seconds=120)
+    await make_call(duration_seconds=119)
+    await make_call(duration_seconds=121)
 
     resp = await client.get("/api/calls", params={"min_duration": 120, "max_duration": 120})
     assert resp.status_code == 200
@@ -395,9 +358,9 @@ async def test_oversized_page_is_422_not_500(client):
     assert resp.status_code == 422
 
 
-async def test_sort_places_nulls_last_in_both_directions(client, session_factory):
-    has_value = await _insert(session_factory, duration_seconds=100)
-    no_value = await _insert(session_factory, duration_seconds=None)
+async def test_sort_places_nulls_last_in_both_directions(client, make_call):
+    has_value = await make_call(duration_seconds=100)
+    no_value = await make_call(duration_seconds=None)
 
     for direction in ("asc", "desc"):
         resp = await client.get(
