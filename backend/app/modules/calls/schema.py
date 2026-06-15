@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import Text
 from sqlmodel import Column, DateTime, Field, SQLModel
 
+from app.core.time import now_utc
+
 
 class CallStatus(str, Enum):
     in_progress = "in_progress"
@@ -60,7 +62,7 @@ class Call(SQLModel, table=True):
     summary: Optional[str] = Field(default=None)
     label: Optional[CallLabel] = Field(default=None, index=True)
     started_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=now_utc,
         sa_column=Column(DateTime, nullable=False),
     )
     ended_at: Optional[datetime] = Field(
@@ -68,11 +70,11 @@ class Call(SQLModel, table=True):
         sa_column=Column(DateTime, nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=now_utc,
         sa_column=Column(DateTime, nullable=False, index=True),
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=now_utc,
         sa_column=Column(DateTime, nullable=False),
     )
     raw_transcript: Optional[str] = Field(default=None)
