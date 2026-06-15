@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { X, Phone, User, Clock, Calendar, FileText, Sparkles, StickyNote, Pencil, Loader2 } from "lucide-react";
@@ -42,7 +42,13 @@ function formatDuration(seconds: number | null): string {
  * Inline-editable notes. Saving updates the UI immediately (optimistic) and rolls back if the
  * request fails; the calls list cache is patched on success so the table stays in sync.
  */
-export function NotesSection({ call }: { call: Call }) {
+export function NotesSection({
+  call,
+  onDirtyChange,
+}: {
+  call: Call;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(call.notes ?? "");
@@ -54,6 +60,13 @@ export function NotesSection({ call }: { call: Call }) {
     setDraft(call.notes ?? "");
     setIsEditing(false);
   }, [call.id, call.notes]);
+
+  // Report unsaved-edit state up so the drawer can warn before a close would discard the draft.
+  const isDirty = isEditing && draft !== (displayNotes ?? "");
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    return () => onDirtyChange?.(false);
+  }, [isDirty, onDirtyChange]);
 
   const mutation = useMutation({
     mutationFn: (notes: string) => callsApi.updateNotes(call.id, notes),
@@ -175,13 +188,23 @@ export function NotesSection({ call }: { call: Call }) {
 }
 
 export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
+  // Track unsaved note edits so closing (overlay or X) can confirm before discarding them.
+  const dirtyRef = useRef(false);
+  const setDirty = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty;
+  }, []);
+  const requestClose = useCallback(() => {
+    if (dirtyRef.current && !window.confirm("Discard your unsaved note?")) return;
+    onClose();
+  }, [onClose]);
+
   if (!call) return null;
 
   return (
     <>
       <div
         className="fixed inset-0 bg-black/20 z-40 transition-opacity"
-        onClick={onClose}
+        onClick={requestClose}
         aria-hidden="true"
       />
 
@@ -193,7 +216,8 @@ export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
             <p className="text-xs text-muted-foreground font-mono mt-0.5">#{call.id.slice(0, 8)}</p>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
+            aria-label="Close details"
             className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <X className="h-4 w-4" />
@@ -241,7 +265,7 @@ export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
           )}
         </div>
 
-        <NotesSection call={call} />
+        <NotesSection call={call} onDirtyChange={setDirty} />
 
         {/* AI Summary */}
         {call.summary && (

@@ -11,3 +11,12 @@ from datetime import datetime, timezone
 def now_utc() -> datetime:
     """Return the current UTC time as a naive datetime (tzinfo stripped)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def to_unix(dt: datetime) -> int:
+    """Convert a naive-UTC datetime to a Unix timestamp (seconds).
+
+    The naive datetimes produced by ``now_utc`` are interpreted as UTC. Used by the webhook
+    signature check to compare the request's ``X-Timestamp`` against the current time.
+    """
+    return int(dt.replace(tzinfo=timezone.utc).timestamp())

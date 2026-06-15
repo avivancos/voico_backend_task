@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.db import async_session
 from app.core.decorators import session_manager
+from app.modules.calls.enrichment import Enricher, build_default_enricher
 from app.modules.calls.repository import CallRepository
 from app.modules.calls.schema import (
     CallLabel,
@@ -18,6 +19,7 @@ from app.modules.calls.schema import (
     UpdateCallNotesRequest,
     WebhookCallPayload,
 )
+from app.modules.calls.security import verify_webhook_signature
 from app.modules.calls.service import CallService
 
 router = APIRouter()
@@ -33,6 +35,14 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 def get_call_service(session: SessionDep) -> CallService:
     return CallService(CallRepository(session))
+
+
+def get_enricher() -> Optional[Enricher]:
+    """The configured AI enricher, or None when no OPENAI_API_KEY is set. Overridden in tests."""
+    return build_default_enricher()
+
+
+EnricherDep = Annotated[Optional[Enricher], Depends(get_enricher)]
 
 
 @router.get(
@@ -123,10 +133,33 @@ async def update_call_notes(
     return await service.update_notes(call_id, payload.notes)
 
 
-@router.post("/webhook/call", response_model=CallResponse)
+@router.post(
+    "/webhook/call",
+    response_model=CallResponse,
+    summary="Ingest a call-completion webhook (update + AI enrichment)",
+    responses={
+        401: {"description": "Missing or invalid webhook signature (when WEBHOOK_SECRET is set)"},
+        404: {"description": "Call not found"},
+        422: {"description": "Invalid webhook payload"},
+    },
+    dependencies=[Depends(verify_webhook_signature)],
+)
 @session_manager
 async def webhook_call(
     payload: WebhookCallPayload,
     session: SessionDep,
+    service: Annotated[CallService, Depends(get_call_service)],
+    enricher: EnricherDep,
 ) -> CallResponse:
-    raise NotImplementedError("webhook_call is implemented in Task 4")
+    """Update a call from its closing webhook and, for terminal calls with a transcript, enrich it.
+
+    Finds the call by ``call_id`` and updates ``status``, ``duration_seconds``, ``raw_transcript``
+    and ``ended_at``. When the new status is ``success``/``failed`` and a transcript is present, an
+    OpenAI summary and ``CallLabel`` classification are generated and stored; if OpenAI is
+    unavailable the field update still persists and ``summary``/``label`` stay null. Re-delivery is
+    idempotent (no re-stamp, no re-enrichment once summarized).
+
+    When ``WEBHOOK_SECRET`` is configured the request must carry a valid HMAC ``X-Signature`` and a
+    fresh ``X-Timestamp`` (replay window); otherwise it is rejected with 401. See ADR-0007.
+    """
+    return await service.ingest_webhook(payload, enricher)

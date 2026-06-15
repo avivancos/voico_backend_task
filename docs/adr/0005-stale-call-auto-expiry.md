@@ -38,7 +38,8 @@ idempotent, and how the scheduler behaves at boot, on failure, and under tests.
   scheduler.
 - **Env-tunable, no code edits to test.** `EXPIRY_INTERVAL_MINUTES` (10) and `EXPIRY_THRESHOLD_MINUTES`
   (30) live in `app/core/config.py` and `.env.example`. They are floats, so a value like `0.1` exercises
-  the job in seconds.
+  the job in seconds. Both are validated `> 0` (`Field(gt=0)`) so a misconfigured `0`/negative value
+  fails fast at boot instead of busy-looping the scheduler or force-failing fresh calls.
 - **No schema change.** Expiry reuses the existing `status`/`updated_at` columns, so there is no new
   column and no migration.
 

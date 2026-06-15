@@ -53,7 +53,7 @@ app.add_middleware(
     allow_origins=settings.allowed_origins_list,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "X-Signature"],
+    allow_headers=["Content-Type", "X-Signature", "X-Timestamp"],
 )
 
 app.include_router(calls_router, prefix="/api", tags=["calls"])

@@ -654,6 +654,7 @@
     },
     "/api/webhook/call": {
       "post": {
+        "description": "Update a call from its closing webhook and, for terminal calls with a transcript, enrich it.\n\nFinds the call by ``call_id`` and updates ``status``, ``duration_seconds``, ``raw_transcript``\nand ``ended_at``. When the new status is ``success``/``failed`` and a transcript is present, an\nOpenAI summary and ``CallLabel`` classification are generated and stored; if OpenAI is\nunavailable the field update still persists and ``summary``/``label`` stay null. Re-delivery is\nidempotent (no re-stamp, no re-enrichment once summarized).\n\nWhen ``WEBHOOK_SECRET`` is configured the request must carry a valid HMAC ``X-Signature`` and a\nfresh ``X-Timestamp`` (replay window); otherwise it is rejected with 401. See ADR-0007.",
         "operationId": "webhook_call_api_webhook_call_post",
         "requestBody": {
           "content": {
@@ -676,18 +677,17 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "Missing or invalid webhook signature (when WEBHOOK_SECRET is set)"
+          },
+          "404": {
+            "description": "Call not found"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "Invalid webhook payload"
           }
         },
-        "summary": "Webhook Call",
+        "summary": "Ingest a call-completion webhook (update + AI enrichment)",
         "tags": [
           "calls"
         ]

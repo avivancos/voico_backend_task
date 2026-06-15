@@ -82,6 +82,15 @@ export function CallsPage() {
     placeholderData: keepPreviousData,
   });
 
+  // Keep an open drawer live: when polling brings a newer version of the selected call, swap it in so
+  // upstream changes (e.g. a webhook completing the call → summary/label/status) appear without
+  // reopening. Guarded by updated_at so it never loops; if the call left the current page it stays.
+  useEffect(() => {
+    if (!selectedCall || !data) return;
+    const fresh = data.data.find((c) => c.id === selectedCall.id);
+    if (fresh && fresh.updated_at !== selectedCall.updated_at) setSelectedCall(fresh);
+  }, [data, selectedCall]);
+
   function handleTabChange(tab: TabValue) {
     setState((s) => ({ ...s, status: tab === "all" ? undefined : tab, page: 1 }));
   }
@@ -134,6 +143,7 @@ export function CallsPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                aria-label="Refresh"
                 className="text-gray-400 hover:text-gray-700"
                 onClick={() => refetch()}
               >

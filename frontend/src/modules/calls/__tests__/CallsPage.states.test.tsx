@@ -45,6 +45,27 @@ test("paginates with the Next button", async () => {
   );
 });
 
+test("keeps an open drawer live when polling returns an updated call", async () => {
+  const call = makeCall({ summary: null, updated_at: "2026-01-01T00:00:00" });
+  list.mockReset();
+  list.mockResolvedValue(pageOf([call]));
+  renderWithProviders(<CallsPage />);
+
+  // Open the drawer from the row; no AI summary yet.
+  fireEvent.click(await screen.findByText(call.phone_number));
+  expect(await screen.findByText("Call Details")).toBeTruthy();
+  expect(screen.queryByText("AI Summary")).toBeNull();
+
+  // The next poll/refresh brings an enriched version of the same call.
+  list.mockResolvedValue(
+    pageOf([{ ...call, summary: "Caller upgraded their plan.", updated_at: "2026-01-01T00:05:00" }]),
+  );
+  fireEvent.click(screen.getByLabelText("Refresh"));
+
+  // The open drawer reflects the upstream change without being reopened.
+  expect(await screen.findByText("Caller upgraded their plan.")).toBeTruthy();
+});
+
 test("clicking a status tab filters by that status", async () => {
   renderWithProviders(<CallsPage />);
   await screen.findByRole("button", { name: /duration/i });

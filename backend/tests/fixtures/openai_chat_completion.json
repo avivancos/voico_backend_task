@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-recorded-voico-0001",
+  "object": "chat.completion",
+  "created": 1735732800,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"summary\": \"The caller asked to upgrade their existing phone plan to one with more data. The agent confirmed the account and outlined the available higher tiers. The caller agreed to proceed with the upgrade.\", \"label\": \"Sales inquiry\"}",
+        "refusal": null
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 162,
+    "completion_tokens": 48,
+    "total_tokens": 210
+  }
+}

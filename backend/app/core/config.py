@@ -1,5 +1,6 @@
 import os
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,14 +17,27 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     app_name: str = "Voico Calls Dashboard"
 
+    # OpenAI enrichment runs inside the webhook request, so the client MUST bound its latency: a
+    # finite per-request timeout and limited retries (worst case ~timeout * (1 + retries)) instead of
+    # the SDK's 600s default. gt=0 / ge=0 so a misconfig fails fast at boot.
+    openai_timeout_seconds: float = Field(default=20.0, gt=0)
+    openai_max_retries: int = Field(default=1, ge=0)
+
     # Comma-separated CORS allow-list. Never use "*" together with credentials.
     allowed_origins: str = "http://localhost:5173"
 
     # Stale-call auto-expiry (Task 3): how often the sweep runs, and how long a call may sit
     # in_progress before it is force-failed. Env-tunable (e.g. EXPIRY_THRESHOLD_MINUTES=1) so the
     # job can be exercised without editing code.
-    expiry_interval_minutes: float = 10
-    expiry_threshold_minutes: float = 30
+    expiry_interval_minutes: float = Field(default=10, gt=0)
+    expiry_threshold_minutes: float = Field(default=30, gt=0)
+
+    # Webhook security (Task 4). Empty secret = opt-in: the webhook accepts unsigned requests (dev /
+    # the README Swagger demo). When set, every request must carry a valid HMAC-SHA256 `X-Signature`
+    # over `"{X-Timestamp}.{raw_body}"` and an `X-Timestamp` within `webhook_tolerance_seconds`
+    # (replay window). See app/modules/calls/security.py and ADR-0007.
+    webhook_secret: str = ""
+    webhook_tolerance_seconds: int = Field(default=300, gt=0)
 
     @property
     def allowed_origins_list(self) -> list[str]:
