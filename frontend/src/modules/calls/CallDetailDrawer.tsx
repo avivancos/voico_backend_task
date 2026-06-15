@@ -234,8 +234,11 @@ export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
           )}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* Scrollable body — metadata + notes + AI summary + transcript scroll together as one
+            region, so the metadata is never squeezed into a cramped sub-scroll. Header, status
+            banner and footer stay fixed. */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-6 py-4">
           <DetailRow
             icon={<Phone className="h-4 w-4" />}
             label="Phone Number"
@@ -292,6 +295,7 @@ export function CallDetailDrawer({ call, onClose }: CallDetailDrawerProps) {
             </div>
           </div>
         )}
+        </div>
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-border bg-muted/30">
